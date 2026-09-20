@@ -224,7 +224,7 @@ void WATERFALL_PushRowListen(const uint16_t *rssiRow, uint16_t bars,
         // peakCol - 1 is evaluated as int (peakCol == 0 -> -1), NOT an
         // unsigned underflow.  Keep it signed on purpose -- rewriting the
         // comparison in unsigned arithmetic (e.g. peakCol - 1u) would make
-        // col >= 255 never match and silently drop the left edge of the falloff.
+        // col >= UINT_MAX never match and silently drop the left edge of the falloff.
         else if (col >= peakCol - 1 && col <= peakCol + 1 &&
                  peakRssi != WATERFALL_RSSI_MAX)
         {

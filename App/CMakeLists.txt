@@ -148,8 +148,22 @@ enable_feature(ENABLE_FLASHLIGHT
 
 # ---- CUSTOM MODS ----
 
+# The waterfall renders the scan trace into the bottom quarter of the display
+# and needs the spectrum state machine to feed it rows, so it is a sub-feature
+# of the spectrum app. It defaults OFF so the feature is opt-in; ENABLE_SPECTRUM
+# stays the app-level toggle.
+option(ENABLE_WATERFALL "Spectrum analyzer waterfall display (requires ENABLE_SPECTRUM)" OFF)
+
+# Hard, unidirectional dependency: without the spectrum app there is no trace
+# to render, so flag the misconfiguration rather than silently doing nothing.
+if(ENABLE_WATERFALL AND NOT ENABLE_SPECTRUM)
+    message(FATAL_ERROR "ENABLE_WATERFALL requires ENABLE_SPECTRUM: the waterfall renders the spectrum trace and is meaningless without the spectrum app.")
+endif()
+
 enable_feature(ENABLE_SPECTRUM
     app/spectrum.c
+)
+enable_feature(ENABLE_WATERFALL
     app/waterfall.c
 )
 enable_feature(ENABLE_BIG_FREQ)

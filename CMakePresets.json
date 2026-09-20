@@ -155,6 +155,7 @@
             "name": "FieldOps",
             "inherits": "Fusion",
             "cacheVariables": {
+                "ENABLE_WATERFALL": true,
                 "ENABLE_FEAT_F4HWN_RESCUE_OPS": true,
                 "ENABLE_FEAT_F4HWN_FOXHUNT": true,
                 "ENABLE_FEAT_F4HWN_BEACON": true,
@@ -176,6 +177,7 @@
             "name": "Labs",
             "inherits": "Fusion",
             "cacheVariables": {
+                "ENABLE_WATERFALL": true,
                 "ENABLE_FEAT_F4HWN_RESCUE_OPS": true,
                 "ENABLE_FEAT_F4HWN_FOXHUNT": false,
                 "ENABLE_FEAT_F4HWN_BEACON": false,
