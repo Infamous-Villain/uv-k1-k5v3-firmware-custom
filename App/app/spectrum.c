@@ -2032,6 +2032,12 @@ static void OnKeyDownStill(KEY_Code_t key) {
             SetState(SPECTRUM);
             lockAGC = false;
             monitorMode = false;
+            // APP_RunSpectrum() zeroes the buffer on entry; mirror that on the
+            // STILL -> SPECTRUM return so the round-trip starts a fresh trace.
+            // Without it the rows after STILL look contiguous with the ones
+            // before it, though they were separated in time by the whole STILL
+            // session.
+            WATERFALL_Init();
             RelaunchScan();
             break;
         }
@@ -2368,6 +2374,10 @@ static void FinalizeCompletedSweep()
     }
 
     // Keep the waterfall dB window in sync with the auto-adjusted dbMax.
+    // DELIBERATE DIVERGENCE FROM APEX: ApeX's FinalizeCompletedSweep() omits
+    // this, so its waterfall dB->gray mapping lags the auto-adjusted dbMax by
+    // up to one sweep. dbmToLevel() (waterfall.c:63) reads the range cached by
+    // SetDbRange, not settings.dbMax live, so re-sync here to avoid that lag.
     WATERFALL_SetDbRange(settings.dbMin, settings.dbMax);
 
     // Next full sweep starts from the opposite side to avoid directional bias.
