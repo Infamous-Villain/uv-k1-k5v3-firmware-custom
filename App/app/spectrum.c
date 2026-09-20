@@ -70,8 +70,27 @@ State currentState = SPECTRUM, previousState = SPECTRUM;
 PeakInfo peak;
 ScanInfo scanInfo;
 static KeyboardState kbd = {KEY_INVALID, KEY_INVALID, 0};
-static bool menuKeyPendingShort = false;
-static bool menuKeyLongHandled = false;
+// Long-press keys share one contract: a short press acts on release, a long
+// press (held to counter==16) fires one action.  Per-key flags so KEY_MENU and
+// KEY_SIDE1 don't clobber each other's pending/handled state.
+enum { LP_MENU = 0, LP_SIDE1, LP_COUNT };
+struct LongPressState { bool shortPending; bool longHandled; };
+static struct LongPressState lpState[LP_COUNT];
+
+static int LongPressIndex(uint8_t key)
+{
+    switch (key)
+    {
+    case KEY_MENU:  return LP_MENU;
+    case KEY_SIDE1: return LP_SIDE1;
+    default:        return -1;
+    }
+}
+
+static uint8_t LongPressKey(int i)
+{
+    return (i == LP_SIDE1) ? KEY_SIDE1 : KEY_MENU;
+}
 
 #ifdef ENABLE_SCAN_RANGES
 static uint16_t blacklistFreqs[15];
@@ -140,6 +159,11 @@ static uint16_t renderTimer = 0;
 // listen-mode rows use separate trackers because they fire at different rates.
 static uint32_t scanWfLastTick = 0;
 static uint32_t wfLastTick = 0;
+
+// Waterfall (bottom 1/4 of the display) on/off, toggled by a KEY_SIDE1 long
+// press.  History keeps filling while hidden (see Tick()), so the trace
+// reappears instantly on the next toggle.
+static bool waterfallVisible = true;
 
 // Disabling automatic DbMax and squelch trigger settings
 static bool manualSetFlag = false;
@@ -2139,8 +2163,11 @@ static void Render()
         RenderSpectrum();
         // Draw the waterfall into the bottom framebuffer pages (5-6) after the
         // curve, so the curve is not overwritten.  Only SPECTRUM mode paints
-        // pages 5-6; STILL/FREQ_INPUT leave them untouched.
-        WATERFALL_Render();
+        // pages 5-6; STILL/FREQ_INPUT leave them untouched.  Toggled by a
+        // KEY_SIDE1 long press; the history keeps filling while hidden (see
+        // Tick()), so the trace reappears instantly on the next toggle.
+        if (waterfallVisible)
+            WATERFALL_Render();
         break;
     case FREQ_INPUT:
         RenderFreqInput();
@@ -2171,41 +2198,59 @@ static bool HandleUserInput()
         kbd.counter = 0;
     }
 
-    // Spectrum MENU key handling:
-    // - short press => action on release
-    // - long press  => one-shot at counter==16
+    // Long-press keys (KEY_MENU, KEY_SIDE1): short press acts on release, long
+    // press (held to counter==16) fires one action.  Intercepted here so holding
+    // them does NOT fall through to the auto-repeat path -- their action is a
+    // toggle/switch, so repeating it would just undo itself.
     if (currentState == SPECTRUM)
     {
-        if (kbd.current == KEY_INVALID && kbd.prev == KEY_MENU)
+        for (int i = 0; i < LP_COUNT; ++i)
         {
-            if (menuKeyPendingShort && !menuKeyLongHandled)
-                OnKeyDown(KEY_MENU);
-            menuKeyPendingShort = false;
-            menuKeyLongHandled = false;
-        }
-        else if (kbd.current != KEY_MENU && kbd.prev != KEY_MENU)
-        {
-            menuKeyPendingShort = false;
-            menuKeyLongHandled = false;
+            uint8_t key = LongPressKey(i);
+            if (kbd.current == KEY_INVALID && kbd.prev == key)
+            {
+                // Released without a long press => short-press action.
+                if (lpState[i].shortPending && !lpState[i].longHandled)
+                    OnKeyDown(key);
+                lpState[i].shortPending = false;
+                lpState[i].longHandled = false;
+            }
+            else if (kbd.current != key && kbd.prev != key)
+            {
+                // Neither the current nor the previous key is this one => clear.
+                lpState[i].shortPending = false;
+                lpState[i].longHandled = false;
+            }
         }
     }
 
     if (kbd.counter == 3 || kbd.counter == 16)
     {
-        if (currentState == SPECTRUM && kbd.current == KEY_MENU)
+        // Long-press keys: intercept before the auto-repeat path so holding them
+        // doesn't repeat their toggle/switch action.
+        if (currentState == SPECTRUM)
         {
-            if (kbd.counter == 3)
+            int idx = LongPressIndex(kbd.current);
+            if (idx >= 0)
             {
-                menuKeyPendingShort = true;
-                menuKeyLongHandled = false;
+                if (kbd.counter == 3)
+                {
+                    lpState[idx].shortPending = true;
+                    lpState[idx].longHandled = false;
+                }
+                else // kbd.counter == 16
+                {
+                    if (!lpState[idx].longHandled)
+                    {
+                        lpState[idx].longHandled = true;
+                        if (kbd.current == KEY_MENU)
+                            ResetSpectrumToDefaults();
+                        else // KEY_SIDE1
+                            waterfallVisible = !waterfallVisible;
+                    }
+                }
+                return true;
             }
-            else if (kbd.counter == 16 && !menuKeyLongHandled)
-            {
-                menuKeyPendingShort = false;
-                menuKeyLongHandled = true;
-                ResetSpectrumToDefaults();
-            }
-            return true;
         }
 
         if (currentState == FREQ_INPUT)
