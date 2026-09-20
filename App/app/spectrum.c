@@ -71,9 +71,9 @@ PeakInfo peak;
 ScanInfo scanInfo;
 static KeyboardState kbd = {KEY_INVALID, KEY_INVALID, 0};
 // Long-press keys share one contract: a short press acts on release, a long
-// press (held to counter==16) fires one action.  Per-key flags so KEY_MENU and
-// KEY_SIDE1 don't clobber each other's pending/handled state.
-enum { LP_MENU = 0, LP_SIDE1, LP_COUNT };
+// press (held to counter==16) fires one action.  Per-key flags so KEY_MENU,
+// KEY_SIDE1 and KEY_SIDE2 don't clobber each other's pending/handled state.
+enum { LP_MENU = 0, LP_SIDE1, LP_SIDE2, LP_COUNT };
 struct LongPressState { bool shortPending; bool longHandled; };
 static struct LongPressState lpState[LP_COUNT];
 
@@ -83,13 +83,20 @@ static int LongPressIndex(uint8_t key)
     {
     case KEY_MENU:  return LP_MENU;
     case KEY_SIDE1: return LP_SIDE1;
+    case KEY_SIDE2: return LP_SIDE2;
     default:        return -1;
     }
 }
 
 static uint8_t LongPressKey(int i)
 {
-    return (i == LP_SIDE1) ? KEY_SIDE1 : KEY_MENU;
+    switch (i)
+    {
+    case LP_MENU:  return KEY_MENU;
+    case LP_SIDE1: return KEY_SIDE1;
+    case LP_SIDE2: return KEY_SIDE2;
+    default:       return KEY_INVALID;
+    }
 }
 
 #ifdef ENABLE_SCAN_RANGES
@@ -2198,10 +2205,10 @@ static bool HandleUserInput()
         kbd.counter = 0;
     }
 
-    // Long-press keys (KEY_MENU, KEY_SIDE1): short press acts on release, long
-    // press (held to counter==16) fires one action.  Intercepted here so holding
-    // them does NOT fall through to the auto-repeat path -- their action is a
-    // toggle/switch, so repeating it would just undo itself.
+    // Long-press keys (KEY_MENU, KEY_SIDE1, KEY_SIDE2): short press acts on
+    // release, long press (held to counter==16) fires one action.  Intercepted
+    // here so holding them does NOT fall through to the auto-repeat path --
+    // their action is a toggle/switch, so repeating it would just undo itself.
     if (currentState == SPECTRUM)
     {
         for (int i = 0; i < LP_COUNT; ++i)
@@ -2211,7 +2218,15 @@ static bool HandleUserInput()
             {
                 // Released without a long press => short-press action.
                 if (lpState[i].shortPending && !lpState[i].longHandled)
-                    OnKeyDown(key);
+                {
+                    // KEY_SIDE2's short action (ToggleBacklight) is handled in
+                    // OnKeyDownCommon, not OnKeyDown; dispatch per key so the
+                    // backlight keeps working in the spectrum window.
+                    if (key == KEY_SIDE2)
+                        OnKeyDownCommon(key);
+                    else
+                        OnKeyDown(key);
+                }
                 lpState[i].shortPending = false;
                 lpState[i].longHandled = false;
             }
@@ -2245,8 +2260,11 @@ static bool HandleUserInput()
                         lpState[idx].longHandled = true;
                         if (kbd.current == KEY_MENU)
                             ResetSpectrumToDefaults();
-                        else // KEY_SIDE1
+                        else if (kbd.current == KEY_SIDE2)
                             waterfallVisible = !waterfallVisible;
+                        // KEY_SIDE1's long press is intentionally unbound here: it
+                        // is still intercepted (to stop the index-0 blacklist spam
+                        // on hold) but fires no long-press action.
                     }
                 }
                 return true;
