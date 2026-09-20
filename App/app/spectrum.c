@@ -75,6 +75,12 @@ static KeyboardState kbd = {KEY_INVALID, KEY_INVALID, 0};
 // Long-press keys share one contract: a short press acts on release, a long
 // press (held to counter==16) fires one action.  Per-key flags so KEY_MENU,
 // KEY_SIDE1 and KEY_SIDE2 don't clobber each other's pending/handled state.
+// The interception is decided here: LongPressIndex maps the key to its LP slot
+// (LP_MENU/LP_SIDE1/LP_SIDE2) and HandleUserInput returns true for any slot >=
+// 0, so holding never reaches the auto-repeat path.  That matters for
+// KEY_SIDE2/LP_SIDE2: in 3a50e212 a held SIDE2 fell through to
+// OnKeyDownCommon -> ToggleBacklight and re-fired every kbd.counter cycle, so
+// this intercept removes that backlight flicker independent of the waterfall.
 enum { LP_MENU = 0, LP_SIDE1, LP_SIDE2, LP_COUNT };
 struct LongPressState { bool shortPending; bool longHandled; };
 static struct LongPressState lpState[LP_COUNT];
@@ -170,9 +176,9 @@ static uint16_t renderTimer = 0;
 static uint32_t scanWfLastTick = 0;
 static uint32_t wfLastTick = 0;
 
-// Waterfall (bottom 1/4 of the display) on/off, toggled by a KEY_SIDE1 long
-// press.  History keeps filling while hidden (see Tick()), so the trace
-// reappears instantly on the next toggle.
+// Waterfall (bottom 1/4 of the display) is hidden by default; a KEY_SIDE2
+// long press reveals it.  History keeps filling while hidden (see Tick()), so
+// the trace reappears instantly on the next toggle.
 static bool waterfallVisible = false;
 #endif
 
@@ -696,6 +702,14 @@ static void ToggleRX(bool on)
         // released before listen was actually engaged).
         // listenPrevRssi = RSSI_MAX_VALUE; // previous behavior
         listenPrevRssi = peak.rssi;
+
+        // Reset the waterfall timer so the first listen-mode row is pushed
+        // after ~one interval rather than a full interval later.  Matches
+        // ApeX:637; the comparison in UpdateListening() is an unsigned
+        // difference, so the pre-start subtraction is safe.
+#ifdef ENABLE_WATERFALL
+        wfLastTick = gGlobalSysTickCounter - (WATERFALL_GetRowInterval() - 3);
+#endif
     #ifdef ENABLE_FEAT_F4HWN_SPECTRUM
         listenT = 25;
         BK4819_WriteRegister(0x43, listenBWRegValues[settings.listenBw]);
@@ -2191,7 +2205,7 @@ static void Render()
         // Draw the waterfall into the bottom framebuffer pages (5-6) after the
         // curve, so the curve is not overwritten.  Only SPECTRUM mode paints
         // pages 5-6; STILL/FREQ_INPUT leave them untouched.  Toggled by a
-        // KEY_SIDE1 long press; the history keeps filling while hidden (see
+        // KEY_SIDE2 long press; the history keeps filling while hidden (see
         // Tick()), so the trace reappears instantly on the next toggle.
 #ifdef ENABLE_WATERFALL
         if (waterfallVisible)
@@ -2287,6 +2301,9 @@ static bool HandleUserInput()
 #ifdef ENABLE_WATERFALL
                             waterfallVisible = !waterfallVisible;
 #endif
+                            // Kept so the SIDE2 toggle site stays in one
+                            // place; the hold is intercepted above by
+                            // LongPressIndex, not this body (empty at OFF).
                         }
                         // KEY_SIDE1's long press is intentionally unbound here: it
                         // is still intercepted (to stop the index-0 blacklist spam
