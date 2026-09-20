@@ -698,15 +698,19 @@ static void InitScanPosition()
     scanInfo.scanStep = GetScanStep();
     scanInfo.measurementsCount = GetStepsCount();
 
-    // Adjust waterfall row interval so refresh rate stays roughly constant
-    // regardless of sweep width.  Narrower scans (fewer steps) need shorter
-    // intervals to keep the waterfall scrolling at a perceptually smooth rate.
+    // Adjust waterfall row interval so the scroll rate stays roughly constant
+    // regardless of sweep width.  Narrower scans (fewer steps) finish each
+    // sweep faster, so rows must be pushed MORE often (SHORTER interval) to
+    // keep the waterfall moving at a perceptually smooth rate.  The interval
+    // therefore grows WITH the step count: a linear map of the clamped step
+    // count onto [DEFAULT/2, DEFAULT] = [160 ms, 320 ms] (16 steps -> 160 ms,
+    // 128 steps -> 320 ms).  The outer clamps are a safety net only.
     {
         uint16_t steps = scanInfo.measurementsCount;
         if (steps < 16) steps = 16;
         if (steps > 128) steps = 128;
-        // Target: ~320ms baseline at 128 steps, scale down to ~160ms at 16 steps
-        uint8_t interval = (uint8_t)(WATERFALL_ROW_10MS_DEFAULT * 128 / steps);
+        uint8_t interval = (uint8_t)(WATERFALL_ROW_10MS_DEFAULT / 2
+                                     + (steps - 16) * (WATERFALL_ROW_10MS_DEFAULT / 2) / 112);
         if (interval < WATERFALL_ROW_10MS_DEFAULT / 2)
             interval = WATERFALL_ROW_10MS_DEFAULT / 2;
         if (interval > WATERFALL_ROW_10MS_DEFAULT * 2)

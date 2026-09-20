@@ -23,6 +23,10 @@
 /* Private data                                                       */
 /* ================================================================== */
 
+/* INVARIANT: waterfallHistory is ONLY accessed from the main loop
+ * (waterfall render/Tick). No ISR, DMA, or nested context reads or
+ * writes this buffer. If adding DMA SPI or USB ISR access, you MUST
+ * add synchronization. */
 static uint8_t waterfallHistory[(WATERFALL_WIDTH * WATERFALL_HEIGHT) / 2];
 static uint8_t waterfallWriteRow;
 static int waterfallDbMin = -130;
@@ -216,6 +220,11 @@ void WATERFALL_PushRowListen(const uint16_t *rssiRow, uint16_t bars,
                     (decay == 1) ? (fadeLevel + signalLevel + 1) / 2 :
                     fadeLevel;
         }
+        // Relies on integer promotion: col and peakCol are uint8_t, so
+        // peakCol - 1 is evaluated as int (peakCol == 0 -> -1), NOT an
+        // unsigned underflow.  Keep it signed on purpose -- rewriting the
+        // comparison in unsigned arithmetic (e.g. peakCol - 1u) would make
+        // col >= 255 never match and silently drop the left edge of the falloff.
         else if (col >= peakCol - 1 && col <= peakCol + 1 &&
                  peakRssi != WATERFALL_RSSI_MAX)
         {

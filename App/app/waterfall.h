@@ -30,11 +30,6 @@ extern "C" {
 #define WATERFALL_PAGE1_IDX  6   /* gFrameBuffer[6] = lines 56-63 */
 #define WATERFALL_RSSI_MAX      65535u
 
-/* INVARIANT: waterfallHistory is ONLY accessed from the main loop
- * (waterfall render/Tick). No ISR, DMA, or nested context reads or
- * writes this buffer. If adding DMA SPI or USB ISR access, you MUST
- * add synchronization. */
-#define WATERFALL_ROW_10MS      32      /* default: 32 × 10ms = 320ms */
 #define WATERFALL_ROW_10MS_DEFAULT  32
 
 /* ------------------------------------------------------------------ */
@@ -53,7 +48,8 @@ uint8_t WATERFALL_GetRowInterval(void);
  * bars:    number of valid entries in rssiRow (1..128).
  *          The row is linearly interpolated across the full 128 waterfall columns
  *          so the waterfall always uses the entire LCD width regardless of zoom.
- * Called from spectrum.c FinalizeCompletedSweep(). */
+ * Called from spectrum.c Tick() once per row interval, gated on the global
+ * SysTick counter via WATERFALL_GetRowInterval() -- not on sweep completion. */
 void WATERFALL_PushRow(const uint16_t *rssiRow, uint16_t bars);
 
 /* Push a listen-mode row: one column boosted to signal brightness, rest
