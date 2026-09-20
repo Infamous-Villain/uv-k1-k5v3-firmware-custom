@@ -597,6 +597,15 @@ uint16_t GetStepsCount()
     return 128 >> settings.stepsCount;
 }
 
+// Bar (frequency-bin) count shown by the curve and fed to the waterfall.
+// Clamped to the 128-pixel display width: both draw one bar per bin, so they
+// must agree on this value or their column mapping diverges.
+uint16_t GetSpectrumBars()
+{
+    uint16_t steps = GetStepsCount();
+    return (steps > 128) ? 128 : steps;
+}
+
 #ifdef ENABLE_SCAN_RANGES
 static uint16_t GetStepsCountDisplay()
 {
@@ -1612,15 +1621,10 @@ static void BuildSpectrumTopY(uint8_t *topY, uint8_t bars)
 
 static void BuildCurrentSpectrumTopY(uint8_t *topY)
 {
-#ifdef ENABLE_FEAT_F4HWN
-    uint16_t steps = GetStepsCount();
-    // max bars at 128 to correctly draw larger numbers of samples
-    uint8_t bars = (steps > 128) ? 128 : steps;
-#else
-    uint8_t bars = 128 >> settings.stepsCount;
-    if (bars == 0)
-        bars = 1;
-#endif
+    // Single source of truth for the bar count, shared with the waterfall
+    // push sites, so the curve and the waterfall can never disagree on a
+    // column index.
+    uint8_t bars = GetSpectrumBars();
 
     BuildSpectrumTopY(topY, bars);
     // Skip cosmetic smoothing in manual mode so the rendered curve matches
@@ -2577,8 +2581,7 @@ static void UpdateListening()
         wfLastTick = gGlobalSysTickCounter;
         if (currentState == SPECTRUM)
         {
-            uint16_t count = scanInfo.measurementsCount;
-            if (count == 0 || count > 128) count = 128;
+            uint16_t count = GetSpectrumBars();
             WATERFALL_PushRowListen(rssiHistory, count, peak.i, scanInfo.rssi);
         }
     }
@@ -2691,8 +2694,7 @@ static void Tick()
             if (gGlobalSysTickCounter - scanWfLastTick >= WATERFALL_GetRowInterval())
             {
                 scanWfLastTick = gGlobalSysTickCounter;
-                uint16_t wfBars = scanInfo.measurementsCount;
-                if (wfBars > 128) wfBars = 128;
+                uint16_t wfBars = GetSpectrumBars();
                 WATERFALL_PushRow(rssiHistory, wfBars);
                 redrawScreen = true;
             }
