@@ -150,6 +150,7 @@ enable_feature(ENABLE_FLASHLIGHT
 
 enable_feature(ENABLE_SPECTRUM
     app/spectrum.c
+    app/waterfall.c
 )
 enable_feature(ENABLE_BIG_FREQ)
 enable_feature(ENABLE_SMALL_BOLD)

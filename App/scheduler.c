@@ -42,7 +42,13 @@
                 flag = true;             \
     } while (0)
 
-static volatile uint32_t gGlobalSysTickCounter;
+/*
+ * Global 10 ms system-tick counter.  Non-static (with the extern in
+ * scheduler.h) so other modules can time long-period work off it without
+ * their own timer.  The spectrum waterfall uses it to gate row pushes to an
+ * adaptive interval independent of per-tick scan overhead (see spectrum.c).
+ */
+volatile uint32_t gGlobalSysTickCounter;
 
 // we come here every 10ms
 void SysTick_Handler(void)

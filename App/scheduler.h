@@ -18,6 +18,9 @@
 
 #include "py32f0xx.h"
 
+/* Defined in scheduler.c; incremented once per 10 ms SysTick interrupt. */
+extern volatile uint32_t gGlobalSysTickCounter;
+
 static void inline SCHEDULER_Enable()
 {
     NVIC_EnableIRQ(SysTick_IRQn);

@@ -16,6 +16,8 @@
 #include "app/spectrum.h"
 #include "audio.h"
 #include "misc.h"
+#include "scheduler.h"   /* gGlobalSysTickCounter */
+#include "app/waterfall.h"
 
 #if defined(ENABLE_UART) || defined(ENABLE_USB)
 #include "app/uart.h"
@@ -132,6 +134,12 @@ static uint8_t renderPage = 0;
 // threshold that would cause an audible "tac" if tied to the sweep rate.
 static uint16_t renderTimer = 0;
 #define RENDER_PERIOD_TICKS 20
+
+// Waterfall row-push timing.  Gated on the global 10 ms SysTick counter so the
+// scroll rate is independent of per-tick scan/SPI overhead.  Scan-mode and
+// listen-mode rows use separate trackers because they fire at different rates.
+static uint32_t scanWfLastTick = 0;
+static uint32_t wfLastTick = 0;
 
 // Disabling automatic DbMax and squelch trigger settings
 static bool manualSetFlag = false;
@@ -689,6 +697,22 @@ static void InitScanPosition()
     ResetScanStats();
     scanInfo.scanStep = GetScanStep();
     scanInfo.measurementsCount = GetStepsCount();
+
+    // Adjust waterfall row interval so refresh rate stays roughly constant
+    // regardless of sweep width.  Narrower scans (fewer steps) need shorter
+    // intervals to keep the waterfall scrolling at a perceptually smooth rate.
+    {
+        uint16_t steps = scanInfo.measurementsCount;
+        if (steps < 16) steps = 16;
+        if (steps > 128) steps = 128;
+        // Target: ~320ms baseline at 128 steps, scale down to ~160ms at 16 steps
+        uint8_t interval = (uint8_t)(WATERFALL_ROW_10MS_DEFAULT * 128 / steps);
+        if (interval < WATERFALL_ROW_10MS_DEFAULT / 2)
+            interval = WATERFALL_ROW_10MS_DEFAULT / 2;
+        if (interval > WATERFALL_ROW_10MS_DEFAULT * 2)
+            interval = WATERFALL_ROW_10MS_DEFAULT * 2;
+        WATERFALL_SetRowInterval(interval);
+    }
     bool startFromLeft = scanStartFromLeft;
 #if SPECTRUM_INTERLACE_LARGE_SWEEPS
     interlacePhase = 0;
@@ -776,6 +800,9 @@ static void UpdateScanInfo()
         if (settings.dbMin > dbMax)
             settings.dbMin = dbMax;
         redrawStatus = true;
+        // Keep the waterfall's dB->gray mapping in sync with the auto-tracked
+        // noise floor so the noise floor stays at a constant brightness.
+        WATERFALL_SetDbRange(settings.dbMin, settings.dbMax);
     }
 }
 
@@ -913,7 +940,8 @@ static void RearmRuntimeState()
     memset(peakHoldAge, 0,              sizeof(peakHoldAge));
     rssiSmoothed = 0;
     manualDbMaxTimer = 0;
-    
+    WATERFALL_SetDbRange(settings.dbMin, settings.dbMax);
+
     RelaunchScan();
 
     redrawScreen = true;
@@ -975,6 +1003,7 @@ static void UpdateDbMax(bool inc)
                            settings.dbMin + 10, 10);
     ClampRssiTriggerLevel();
     manualDbMaxTimer = MANUAL_DBMAX_SWEEPS;
+    WATERFALL_SetDbRange(settings.dbMin, settings.dbMax);
     redrawScreen = true;
     redrawStatus = true;
 }
@@ -2104,6 +2133,10 @@ static void Render()
     {
     case SPECTRUM:
         RenderSpectrum();
+        // Draw the waterfall into the bottom framebuffer pages (5-6) after the
+        // curve, so the curve is not overwritten.  Only SPECTRUM mode paints
+        // pages 5-6; STILL/FREQ_INPUT leave them untouched.
+        WATERFALL_Render();
         break;
     case FREQ_INPUT:
         RenderFreqInput();
@@ -2267,6 +2300,9 @@ static void FinalizeCompletedSweep()
         settings.dbMax = newMax;
     }
 
+    // Keep the waterfall dB window in sync with the auto-adjusted dbMax.
+    WATERFALL_SetDbRange(settings.dbMin, settings.dbMax);
+
     // Next full sweep starts from the opposite side to avoid directional bias.
     scanStartFromLeft = !scanStartFromLeft;
     newScanStart = true;
@@ -2413,6 +2449,23 @@ static void UpdateListening()
     peak.rssi = scanInfo.rssi;
     rssiSmoothed = rssiSmoothed ? (rssiSmoothed * 3 + scanInfo.rssi) >> 2
                                 : scanInfo.rssi;
+
+    // Waterfall row push at adaptive interval using the global SysTick
+    // counter for consistent timing regardless of per-tick overhead.  Only
+    // SPECTRUM mode renders the waterfall; in STILL mode a single-column row
+    // would leave a black-line artifact when switching back to SPECTRUM, so
+    // the push is skipped there.
+    if (gGlobalSysTickCounter - wfLastTick >= WATERFALL_GetRowInterval())
+    {
+        wfLastTick = gGlobalSysTickCounter;
+        if (currentState == SPECTRUM)
+        {
+            uint16_t count = scanInfo.measurementsCount;
+            if (count == 0 || count > 128) count = 128;
+            WATERFALL_PushRowListen(rssiHistory, count, peak.i, scanInfo.rssi);
+        }
+    }
+
     redrawScreen = true;
     redrawStatus = true;
 
@@ -2511,6 +2564,19 @@ static void Tick()
     {
         if (currentState == SPECTRUM)
         {
+            // Waterfall row push at adaptive intervals, independent of sweep
+            // completion.  Uses the global SysTick hardware counter for
+            // wall-clock timing so scan-mode tick overhead can't slow it below
+            // listen mode.  Cap bars at ARRAY_SIZE(rssiHistory) to prevent a
+            // buffer over-read in large scan-range mode (>128 steps).
+            if (gGlobalSysTickCounter - scanWfLastTick >= WATERFALL_GetRowInterval())
+            {
+                scanWfLastTick = gGlobalSysTickCounter;
+                uint16_t wfBars = scanInfo.measurementsCount;
+                if (wfBars > 128) wfBars = 128;
+                WATERFALL_PushRow(rssiHistory, wfBars);
+                redrawScreen = true;
+            }
             UpdateScan();
         }
         else if (currentState == STILL)
@@ -2600,6 +2666,11 @@ void APP_RunSpectrum()
     // are runtime values and should not carry over between sessions.
     // manualSetFlag = false;
     // settings.rssiTriggerLevel = RSSI_MAX_VALUE;
+
+    // Clear the waterfall's circular history buffer so a previous run (or
+    // STILL-mode single-column data) does not show as a dark band when the
+    // scan starts fresh.  The waterfall history is separate from rssiHistory[].
+    WATERFALL_Init();
 
     RearmRuntimeState();
 
