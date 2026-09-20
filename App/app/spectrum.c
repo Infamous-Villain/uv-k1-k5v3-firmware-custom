@@ -170,7 +170,7 @@ static uint32_t wfLastTick = 0;
 // Waterfall (bottom 1/4 of the display) on/off, toggled by a KEY_SIDE1 long
 // press.  History keeps filling while hidden (see Tick()), so the trace
 // reappears instantly on the next toggle.
-static bool waterfallVisible = true;
+static bool waterfallVisible = false;
 
 // Disabling automatic DbMax and squelch trigger settings
 static bool manualSetFlag = false;
